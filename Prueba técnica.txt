@@ -1,0 +1,214 @@
+Prueba técnica: API de Pedidos e Inventario (Order & Inventory API)
+Objetivo
+Construir una API REST en .NET que gestione el ciclo de vida de un Pedido con reserva de stock, aplicando:
+•
+DDD (Agregados, Value Objects, invariantes, Domain Events si aplica)
+•
+Arquitectura Hexagonal (Ports & Adapters)
+•
+SOLID y separación de responsabilidades
+•
+Persistencia con EF Core (modelado relacional cuidando constraints)
+•
+Unit Testing (dominio y aplicación)
+Contexto de negocio (dominio)
+Una empresa vende productos. Los clientes crean pedidos con líneas de producto. Al confirmar un pedido se debe reservar stock. Luego el pedido puede pagarse o cancelarse. Si se cancela, se libera la reserva.
+El foco no es “hacer CRUD”, sino modelar correctamente el comportamiento y reglas.
+Casos de uso (funcionalidades mínimas)
+1) Gestión de productos e inventario
+•
+Crear producto
+•
+Ajustar stock (incremento/decremento)
+•
+Consultar producto con stock disponible
+Reglas:
+•
+El stock no puede quedar negativo.
+•
+Debe existir trazabilidad mínima del ajuste (motivo o tipo de operación).
+2) Clientes
+•
+Crear cliente
+•
+Consultar cliente
+3) Pedidos (Aggregate Root: Order)
+Endpoints/acciones esperadas:
+• Crear pedido en estado Draft
+• Agregar línea(s) al pedido (producto + cantidad)
+• Confirmar pedido → intenta reservar stock
+• Pagar pedido
+• Cancelar pedido → libera stock reservado
+Reglas de negocio (invariantes mínimas):
+• Un pedido no puede confirmarse sin líneas.
+• Un pedido no puede pagarse si no está confirmado.
+• Un pedido no puede modificarse (líneas) si está
+confirmado/pagado/cancelado.
+• Al confirmar:
+o Si no hay stock suficiente de algún producto → operación falla (error
+de negocio).
+o Si hay stock suficiente → se registra la reserva.
+• Al cancelar:
+o Si estaba confirmado → la reserva se revierte.
+o Si estaba pagado → define una regla (por ejemplo: “no se puede
+cancelar pagado” o “se cancela con reembolso”; documenta la
+decisión).
+Consultas:
+• Obtener un pedido por id (incluye líneas, totales, estado)
+• Listar pedidos por cliente y/o estado (con paginación simple)
+Requisitos de modelado de datos (EF Core)
+Se evalúa que el modelo sea relacionalmente sólido, no solo que “guarde datos”.
+Mínimos esperados:
+•
+Relaciones correctas:
+o
+Order (1) -> OrderLine (N)
+o
+Product (1) -> StockMovements (N) o similar
+o
+Customer (1) -> Orders (N)
+•
+Constraints:
+o
+FK consistentes
+o
+Unicidad donde aplique (por ejemplo SKU o ProductCode)
+o
+Índices razonables (por ejemplo por CustomerId + Status en Orders)
+•
+Manejo de concurrencia en stock (sugerido: RowVersion/concurrency token o estrategia equivalente).
+•
+Uso correcto de Value Objects persistidos (Owned Types / conversiones), por ejemplo:
+o
+Money (Amount + Currency) o al menos un Total consistente
+o
+OrderStatus como enum/value
+•
+Migraciones y DB reproducible (ideal con Docker).
+Bonus de seniority: explicar decisiones (por qué esa estrategia de concurrencia, por qué esa estructura de tablas).
+Arquitectura esperada (Hexagonal + DDD)
+Estructura sugerida (no obligatoria, pero sí se evalúa la idea):
+•
+Domain
+o
+Entidades / Agregados (Order, Product, etc.)
+o
+Value Objects (Money, OrderId, etc.)
+o
+Reglas/invariantes
+o
+(Opcional) Domain Events
+•
+Application
+o
+Use cases (Commands/Handlers o Services)
+o
+Interfaces (Ports): IOrderRepository, IProductRepository, IUnitOfWork, IStockService (si aplica)
+o
+DTOs de entrada/salida (no entidades de dominio)
+•
+Infrastructure
+o
+EF Core DbContext + configuraciones (Fluent)
+o
+Implementación repositorios (Adapters)
+o
+Implementación UnitOfWork / transacciones
+•
+API
+o
+Controllers/Minimal APIs
+o
+Validación + ProblemDetails
+o
+Swagger
+Se evalúa especialmente:
+•
+Que el dominio no dependa de EF Core/ASP.NET Core.
+•
+Que EF sea un adapter, no el centro del diseño.
+•
+Que los casos de uso estén en Application y no en controllers.
+Testing (mínimos obligatorios)
+Se busca calidad de pruebas, no cantidad.
+1.
+Unit tests de Dominio
+•
+Invariantes del pedido (confirmar sin líneas, pagar sin confirmar, etc.)
+•
+Cálculo de total (si aplica)
+•
+Reglas de transición de estados
+2.
+Unit tests de Application
+•
+Confirmación de pedido reservando stock (mock de repos/ports)
+•
+Caso de stock insuficiente (error de negocio)
+3.
+Al menos 1 prueba de integración
+•
+API o repositorio contra una DB realista (SQLite en modo relacional o contenedor)
+•
+Verifica persistencia de líneas + cambios de estado + stock
+Herramientas: NUnit/xUnit, FluentAssertions, Moq, etc. (elige, pero consistencia y legibilidad cuentan).
+Entregables
+•
+Repositorio con:
+o
+Código fuente
+o
+README con:
+▪
+cómo ejecutar (ideal: docker compose up + migraciones)
+▪
+decisiones de arquitectura (2–6 puntos claros)
+▪
+cómo correr tests
+o
+Colección de endpoints documentada en Swagger
+•
+(Opcional) diagrama simple (contexto/paquetes o dependencias)
+Criterios de evaluación (rubrica sugerida)
+Funcionalidad (25%)
+•
+Casos de uso completos y consistentes
+•
+Manejo correcto de errores y estados
+•
+API clara (códigos HTTP, ProblemDetails)
+Modelado y EF Core (25%)
+•
+Relaciones, constraints, índices, migraciones
+•
+Concurrencia en stock (o al menos estrategia razonada)
+•
+Buen mapping de Value Objects / enums / owned types
+DDD + Hexagonal (25%)
+•
+Agregados con invariantes reales
+•
+Separación Domain / Application / Infrastructure / API
+•
+Puertos/adaptadores bien definidos
+SOLID + calidad de código (15%)
+•
+Responsabilidades claras
+•
+Nombres, legibilidad, cohesión
+•
+Evitar “God services” y lógica en controllers
+Testing (20%)
+•
+Tests de dominio expresivos y útiles
+•
+Tests de aplicación con buenos dobles/mocks
+•
+1+ integración para EF/API
+Señales fuertes de seniority
+•
+Decisiones explícitas y justificadas (README/ADRs cortos)
+•
+Manejo de edge cases (idempotencia en confirmación/pago, concurrencia stock)
+•
+Buen equilibrio: no sobre-ingeniería, pero sí diseño intencional
