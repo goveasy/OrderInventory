@@ -1,7 +1,9 @@
-﻿using OrderInventory.Application.Abstractions;
+using OrderInventory.Application.Abstractions;
 using OrderInventory.Application.Products;
 using OrderInventory.Domain.Orders;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace OrderInventory.Application.Orders.ConfirmOrder;
 
@@ -25,86 +27,80 @@ public class ConfirmOrderService
         _dataBaseLockService = dataBaseLockService;
     }
 
-
-
     public async Task ConfirmOrderAsync(ConfirmOrderCommand command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var order = await _orderRepository.GetOrderAsync(command.OrderId, cancellationToken) 
+        var order = await _orderRepository.GetOrderAsync(command.OrderId, cancellationToken)
                     ?? throw new InvalidOperationException("Order not found.");
 
-        if (!order.CanConfirm()) 
-        { 
+        if (!order.CanConfirm())
+        {
             throw new InvalidOperationException("Order cannot be confirmed in its current state.");
         }
 
-
-        foreach (var line in order.OrderLines)
-        {
-            try
-            {
-                await ReserveStock(line, cancellationToken);
-            }
-            catch (Exception)
-            {
-                foreach (var reservedLine in order.OrderLines.Where(l => l.Reserved))
-                {
-                    await RollbackReservation(reservedLine, cancellationToken);
-                }
-                throw;
-            }
-        }
-
-        order.ConfirmOrder();
-
-        await _unitOfWork.CommitChangesAsync(cancellationToken);
-    }
-
-    private async Task ReserveStock(OrderProductLine line, CancellationToken cancellationToken)
-    {
-        var productLock = await _dataBaseLockService.AcquireLockAsync(line.ProductId.ToString(), TimeSpan.FromSeconds(5), cancellationToken);
-
-        if (productLock is null)
-        {
-            throw new InvalidOperationException($"Could not acquire lock for product {line.ProductId}");
-        }
+        var productLocks = await AcquireProductLocksAsync(order, cancellationToken);
 
         try
+        {
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                await ReserveStock(order, ct);
+
+                order.ConfirmOrder();
+
+                await _unitOfWork.CommitChangesAsync(ct);
+            }, cancellationToken);
+        }
+        finally
+        {
+            await ReleaseLocksAsync(productLocks);
+        }
+    }
+
+    private async Task ReserveStock(Order order, CancellationToken cancellationToken)
+    {
+        foreach (var line in order.OrderLines)
         {
             var product = await _productRepository.GetAsync(line.ProductId, cancellationToken)
                           ?? throw new InvalidOperationException("Product not found.");
 
             product.DecreaseStock(line.Quantity);
             line.MarkAsReserved();
-
-            await _unitOfWork.CommitChangesAsync(cancellationToken);
-        }
-        finally
-        {
-            await productLock.DisposeAsync();
         }
     }
 
-    private async Task RollbackReservation(OrderProductLine line, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<IAsyncDisposable>> AcquireProductLocksAsync(Order order, CancellationToken cancellationToken)
     {
-        var productLock = await _dataBaseLockService.AcquireLockAsync(line.ProductId.ToString(), TimeSpan.FromSeconds(5), cancellationToken);
-        if (productLock is null)
-        {
-            throw new InvalidOperationException($"Could not acquire lock for product {line.ProductId}");
-        }
+        var locks = new List<IAsyncDisposable>();
+
         try
         {
-            var product = await _productRepository.GetAsync(line.ProductId, cancellationToken)
-                          ?? throw new InvalidOperationException("Product not found.");
-            product.IncreaseStock(line.Quantity);
-            line.MarkAsUnreserved();
-            await _unitOfWork.CommitChangesAsync(cancellationToken);
+            foreach (var productId in order.OrderLines.Select(line => line.ProductId).Distinct().OrderBy(id => id))
+            {
+                var productLock = await _dataBaseLockService.AcquireLockAsync(productId.ToString(), TimeSpan.FromSeconds(5), cancellationToken);
+
+                if (productLock is null)
+                {
+                    throw new InvalidOperationException($"Could not acquire lock for product {productId}");
+                }
+
+                locks.Add(productLock);
+            }
+
+            return locks;
         }
-        finally
+        catch
+        {
+            await ReleaseLocksAsync(locks);
+            throw;
+        }
+    }
+
+    private static async Task ReleaseLocksAsync(IEnumerable<IAsyncDisposable> locks)
+    {
+        foreach (var productLock in locks)
         {
             await productLock.DisposeAsync();
         }
     }
-
-
 }

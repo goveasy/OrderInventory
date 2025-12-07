@@ -1,6 +1,7 @@
 ﻿
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using OrderInventory.Application.Abstractions;
 using OrderInventory.Domain.Orders;
 using OrderInventory.Domain.Products;
@@ -25,5 +26,23 @@ public class OrderInventoryDbContext : DbContext, IUnitOfWork
     public Task<int> CommitChangesAsync(CancellationToken cancellationToken = default)
     {
         return SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ExecuteInTransactionAsync(
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        IExecutionStrategy strategy = Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+
+            await operation(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 }
