@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path="Directory.Build.props" />
+  </Folder>
+  <Project Path="OrderInventory.Application/OrderInventory.Application.csproj" Id="6a77f75b-7d7a-4a9c-aa4c-ed8ffdcba88b" />
+  <Project Path="OrderInventory.Domain/OrderInventory.Domain.csproj" />
+  <Project Path="OrderInventory.Infrastructure/OrderInventory.Infrastructure.csproj" Id="c7cde555-8b7f-4b15-9e28-06355cd7ac84" />
+  <Project Path="OrderInventory.WebApi/OrderInventory.WebApi.csproj" Id="7b437a67-49a2-4f03-974d-4521edecf149" />
+</Solution>
